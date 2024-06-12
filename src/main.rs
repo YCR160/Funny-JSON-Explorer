@@ -19,7 +19,6 @@ struct Opt {
 
 // 创建一个图标类，提供从图标到两个字符的映射
 struct Icon {
-    // 从图标到两个字符的映射
     _map: HashMap<String, (char, char)>,
     non_leaf_icon: char,
     leaf_icon: char,
