@@ -69,22 +69,13 @@ impl Printer for TreePrinter {
     fn build(&mut self, value: &serde_json::Value) {
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(value);
-        while !queue.is_empty() {
-            let node = queue.pop_front().unwrap();
-            match node {
-                serde_json::Value::Object(map) => {
-                    for value in map.values() {
-                        queue.push_back(value);
-                    }
-                }
-                serde_json::Value::Array(array) => {
-                    for value in array {
-                        queue.push_back(value);
-                    }
-                }
-                _ => {
-                    self.child_count -= 1;
-                }
+        while let Some(node) = queue.pop_front() {
+            if let serde_json::Value::Object(map) = node {
+                queue.extend(map.values());
+            } else if let serde_json::Value::Array(array) = node {
+                queue.extend(array);
+            } else {
+                self.child_count -= 1;
             }
             self.child_count += 1;
             self.max_len = self.max_len.max(node.to_string().len());
@@ -93,36 +84,32 @@ impl Printer for TreePrinter {
     }
 
     fn insert(&mut self, value: &serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                for (key, value) in map {
-                    let s = key.to_string();
-                    for (j, c) in s.chars().enumerate() {
-                        self.matrix[self.index][j + self.depth] = c;
-                    }
-                    self.index += 1;
-                    self.depth += 3;
-                    self.insert(value);
-                    self.depth -= 3;
+        if let serde_json::Value::Object(map) = value {
+            for (key, value) in map {
+                let s = key.to_string();
+                for (j, c) in s.chars().enumerate() {
+                    self.matrix[self.index][j + self.depth] = c;
                 }
+                self.index += 1;
+                self.depth += 3;
+                self.insert(value);
+                self.depth -= 3;
             }
-            serde_json::Value::Array(array) => {
-                for value in array {
-                    self.insert(value);
-                }
+        } else if let serde_json::Value::Array(array) = value {
+            for value in array {
+                self.insert(value);
             }
-            _ => {
-                let s = value.to_string();
-                let s = s[1..s.len() - 1].to_string();
-                self.index -= 1;
-                let mut j = self.max_len - 1;
-                while j > 0 && self.matrix[self.index][j] == ' ' {
-                    j -= 1;
-                }
-                self.matrix[self.index][j] = ':';
-                for (k, c) in s.chars().enumerate() {
-                    self.matrix[self.index][j + k + 2] = c;
-                }
+        } else {
+            let s = value.to_string();
+            let s = s[1..s.len() - 1].to_string();
+            self.index -= 1;
+            let j = self.matrix[self.index]
+                .iter()
+                .rposition(|&c| c != ' ')
+                .unwrap_or(0);
+            self.matrix[self.index][j] = ':';
+            for (k, c) in s.chars().enumerate() {
+                self.matrix[self.index][j + k + 2] = c;
             }
         }
     }
@@ -130,48 +117,41 @@ impl Printer for TreePrinter {
     fn print(&mut self, icon: &Icon) {
         let mut first_char = vec![0; self.child_count];
         let mut max_first_char = 0;
-        for i in 0..self.child_count {
-            for j in 0..self.max_len {
-                if self.matrix[i][j] != ' ' {
-                    first_char[i] = j;
-                    max_first_char = max_first_char.max(j);
-                    break;
-                }
+        for (i, row) in self.matrix.iter().enumerate() {
+            if let Some(j) = row.iter().position(|&c| c != ' ') {
+                first_char[i] = j;
+                max_first_char = max_first_char.max(j);
             }
         }
-        for i in 0..self.child_count {
-            // 如果下一行的第一个非空格字符位置大于当前行的第一个非空格字符位置，说明当前行是子节点
-            if i + 1 < self.child_count && first_char[i + 1] > first_char[i] {
-                self.matrix[i][first_char[i] - 1] = icon.non_leaf_icon;
-            } else {
-                self.matrix[i][first_char[i] - 1] = icon.leaf_icon;
-            }
+        for (i, &first) in first_char.iter().enumerate() {
+            let icon = match i + 1 < self.child_count && first_char[i + 1] > first {
+                true => icon.non_leaf_icon,
+                false => icon.leaf_icon,
+            };
+            self.matrix[i][first - 1] = icon;
         }
         for i in (0..self.child_count).rev() {
-            if self.matrix[i][first_char[i] - 3] == ' ' {
-                self.matrix[i][first_char[i] - 3] = '└';
-                self.matrix[i][first_char[i] - 2] = '─';
-                for j in (0..i).rev() {
-                    if self.matrix[j][first_char[i] - 3] != ' ' {
-                        break;
-                    }
-                    if self.matrix[j + 1][first_char[i] - 3] == '└'
-                        || self.matrix[j + 1][first_char[i] - 3] == '├'
-                        || self.matrix[j + 1][first_char[i] - 3] == '│'
-                    {
-                        self.matrix[j][first_char[i] - 3] = '│';
+            match self.matrix[i][first_char[i] - 3] {
+                ' ' => {
+                    self.matrix[i][first_char[i] - 3] = '└';
+                    self.matrix[i][first_char[i] - 2] = '─';
+                    for j in (0..i).rev() {
+                        if self.matrix[j][first_char[i] - 3] != ' ' {
+                            break;
+                        }
+                        if ['└', '├', '│'].contains(&self.matrix[j + 1][first_char[i] - 3]) {
+                            self.matrix[j][first_char[i] - 3] = '│';
+                        }
                     }
                 }
-            } else {
-                self.matrix[i][first_char[i] - 3] = '├';
-                self.matrix[i][first_char[i] - 2] = '─';
+                _ => {
+                    self.matrix[i][first_char[i] - 3] = '├';
+                    self.matrix[i][first_char[i] - 2] = '─';
+                }
             }
         }
-        for i in 0..self.child_count {
-            for j in 0..self.max_len {
-                print!("{}", self.matrix[i][j]);
-            }
-            println!();
+        for (_, row) in self.matrix.iter().enumerate() {
+            println!("{}", row.iter().collect::<String>());
         }
     }
 }
@@ -180,111 +160,95 @@ impl Printer for RectanglePrinter {
     fn build(&mut self, value: &serde_json::Value) {
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(value);
-        while !queue.is_empty() {
-            let node = queue.pop_front().unwrap();
-            match node {
-                serde_json::Value::Object(map) => {
-                    for value in map.values() {
-                        queue.push_back(value);
-                    }
-                }
-                serde_json::Value::Array(array) => {
-                    for value in array {
-                        queue.push_back(value);
-                    }
-                }
-                _ => {
-                    self.child_count -= 1;
-                }
+        while let Some(node) = queue.pop_front() {
+            if let serde_json::Value::Object(map) = node {
+                queue.extend(map.values());
+            } else if let serde_json::Value::Array(array) = node {
+                queue.extend(array);
+            } else {
+                self.child_count -= 1;
             }
             self.child_count += 1;
             self.max_len = self.max_len.max(node.to_string().len());
         }
         self.matrix = vec![vec![' '; self.max_len]; self.child_count];
     }
+
     fn insert(&mut self, value: &serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                for (key, value) in map {
-                    let s = key.to_string();
-                    for (j, c) in s.chars().enumerate() {
-                        self.matrix[self.index][j + self.depth] = c;
-                    }
-                    self.index += 1;
-                    self.depth += 3;
-                    self.insert(value);
-                    self.depth -= 3;
+        if let serde_json::Value::Object(map) = value {
+            for (key, value) in map {
+                let s = key.to_string();
+                for (j, c) in s.chars().enumerate() {
+                    self.matrix[self.index][j + self.depth] = c;
                 }
+                self.index += 1;
+                self.depth += 3;
+                self.insert(value);
+                self.depth -= 3;
             }
-            serde_json::Value::Array(array) => {
-                for value in array {
-                    self.insert(value);
-                }
+        } else if let serde_json::Value::Array(array) = value {
+            for value in array {
+                self.insert(value);
             }
-            _ => {
-                let s = value.to_string();
-                let s = s[1..s.len() - 1].to_string();
-                self.index -= 1;
-                let mut j = self.max_len - 1;
-                while j > 0 && self.matrix[self.index][j] == ' ' {
-                    j -= 1;
-                }
-                self.matrix[self.index][j] = ':';
-                for (k, c) in s.chars().enumerate() {
-                    self.matrix[self.index][j + k + 2] = c;
-                }
+        } else {
+            let s = value.to_string();
+            let s = s[1..s.len() - 1].to_string();
+            self.index -= 1;
+            let j = self.matrix[self.index]
+                .iter()
+                .rposition(|&c| c != ' ')
+                .unwrap_or(0);
+            self.matrix[self.index][j] = ':';
+            for (k, c) in s.chars().enumerate() {
+                self.matrix[self.index][j + k + 2] = c;
             }
         }
     }
+
     fn print(&mut self, icon: &Icon) {
         let mut first_char = vec![0; self.child_count];
         let mut max_first_char = 0;
-        for i in 0..self.child_count {
-            for j in 0..self.max_len {
-                if self.matrix[i][j] != ' ' {
-                    first_char[i] = j;
-                    max_first_char = max_first_char.max(j);
-                    break;
-                }
+        for (i, row) in self.matrix.iter().enumerate() {
+            if let Some(j) = row.iter().position(|&c| c != ' ') {
+                first_char[i] = j;
+                max_first_char = max_first_char.max(j);
             }
         }
-        for i in 0..self.child_count {
-            // 如果下一行的第一个非空格字符位置大于当前行的第一个非空格字符位置，说明当前行是子节点
-            if i + 1 < self.child_count && first_char[i + 1] > first_char[i] {
-                self.matrix[i][first_char[i] - 1] = icon.non_leaf_icon;
+        for ((i, &first_char_i), row) in first_char.iter().enumerate().zip(&mut self.matrix) {
+            if i + 1 < self.child_count && first_char[i + 1] > first_char_i {
+                row[first_char_i - 1] = icon.non_leaf_icon;
             } else {
-                self.matrix[i][first_char[i] - 1] = icon.leaf_icon;
+                row[first_char_i - 1] = icon.leaf_icon;
             }
         }
         for i in (0..self.child_count).rev() {
-            if self.matrix[i][first_char[i] - 3] == ' ' {
-                self.matrix[i][first_char[i] - 3] = '├';
-                self.matrix[i][first_char[i] - 2] = '─';
-                for j in (0..i).rev() {
-                    if self.matrix[j][first_char[i] - 3] != ' ' {
-                        break;
+            match self.matrix[i][first_char[i] - 3] {
+                ' ' => {
+                    self.matrix[i][first_char[i] - 3] = '├';
+                    self.matrix[i][first_char[i] - 2] = '─';
+                    for j in (0..i).rev() {
+                        if self.matrix[j][first_char[i] - 3] != ' ' {
+                            break;
+                        }
+                        match self.matrix[j + 1][first_char[i] - 3] {
+                            '├' | '│' => self.matrix[j][first_char[i] - 3] = '│',
+                            _ => (),
+                        }
                     }
-                    if self.matrix[j + 1][first_char[i] - 3] == '├'
-                        || self.matrix[j + 1][first_char[i] - 3] == '├'
-                        || self.matrix[j + 1][first_char[i] - 3] == '│'
-                    {
-                        self.matrix[j][first_char[i] - 3] = '│';
-                    }
-                }
-                for j in i + 1..self.child_count {
-                    if self.matrix[j][first_char[i] - 3] != ' ' {
-                        break;
-                    }
-                    if self.matrix[j - 1][first_char[i] - 3] == '├'
-                        || self.matrix[j - 1][first_char[i] - 3] == '├'
-                        || self.matrix[j - 1][first_char[i] - 3] == '│'
-                    {
-                        self.matrix[j][first_char[i] - 3] = '│';
+                    for j in i + 1..self.child_count {
+                        if self.matrix[j][first_char[i] - 3] != ' ' {
+                            break;
+                        }
+                        match self.matrix[j - 1][first_char[i] - 3] {
+                            '├' | '│' => self.matrix[j][first_char[i] - 3] = '│',
+                            _ => (),
+                        }
                     }
                 }
-            } else {
-                self.matrix[i][first_char[i] - 3] = '├';
-                self.matrix[i][first_char[i] - 2] = '─';
+                _ => {
+                    self.matrix[i][first_char[i] - 3] = '├';
+                    self.matrix[i][first_char[i] - 2] = '─';
+                }
             }
             // 将本行的最后一个非空格字符位置之后的字符设置为─
             for j in (first_char[i] + 1..self.max_len).rev() {
@@ -304,20 +268,18 @@ impl Printer for RectanglePrinter {
                 self.matrix[i][self.max_len - 1] = '┤';
             }
         }
-        for j in 1..first_char[self.child_count - 2] {
-            if self.matrix[self.child_count - 1][j] == ' ' {
-                self.matrix[self.child_count - 1][j] = '─';
-            } else if self.matrix[self.child_count - 1][j] == '│'
-                || self.matrix[self.child_count - 1][j] == '├'
-            {
-                self.matrix[self.child_count - 1][j] = '┴';
-            }
+        for (_, cell) in self.matrix[self.child_count - 1][1..first_char[self.child_count - 2]]
+            .iter_mut()
+            .enumerate()
+        {
+            *cell = match *cell {
+                ' ' => '─',
+                '│' | '├' => '┴',
+                _ => *cell,
+            };
         }
-        for i in 0..self.child_count {
-            for j in 0..self.max_len {
-                print!("{}", self.matrix[i][j]);
-            }
-            println!();
+        for (_, row) in self.matrix.iter().enumerate() {
+            println!("{}", row.iter().collect::<String>());
         }
     }
 }
@@ -361,18 +323,19 @@ fn main() {
     let opt = Opt::from_args();
     println!("{:?}", opt);
 
-    let file = std::fs::File::open(&opt.file).unwrap();
+    let file = std::fs::File::open(&opt.file).expect("Failed to open file");
     let reader = std::io::BufReader::new(file);
 
-    let value: serde_json::Value = serde_json::from_reader(reader).unwrap();
+    let value: serde_json::Value = serde_json::from_reader(reader).expect("Failed to parse JSON");
 
     let icon = Icon::new(&opt.icon);
     let mut factory = PrinterFactory::new();
-    if let Some(printer) = factory.get_printer(&opt.style) {
-        printer.build(&value);
-        printer.insert(&value);
-        printer.print(&icon);
-    } else {
-        println!("Unsupported style: {}", opt.style);
+    match factory.get_printer(&opt.style) {
+        Some(printer) => {
+            printer.build(&value);
+            printer.insert(&value);
+            printer.print(&icon);
+        }
+        None => println!("Unsupported style: {}", opt.style),
     }
 }
