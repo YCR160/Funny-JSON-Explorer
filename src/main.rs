@@ -249,7 +249,6 @@ impl Printer for RectanglePrinter {
                     self.matrix[i][first_char[i] - 2] = '─';
                 }
             }
-            // 将本行的最后一个非空格字符位置之后的字符设置为─
             for j in (first_char[i] + 1..self.max_len).rev() {
                 if self.matrix[i][j] != ' ' {
                     self.matrix[i][j + 1] = ' ';
