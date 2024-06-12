@@ -68,17 +68,18 @@ impl Printer for TreePrinter {
     fn build(&mut self, value: &serde_json::Value) {
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(value);
+        let mut sub = 1;
         while let Some(node) = queue.pop_front() {
             if let serde_json::Value::Object(map) = node {
                 queue.extend(map.values());
             } else if let serde_json::Value::Array(array) = node {
                 queue.extend(array);
-            } else {
-                self.child_count -= 1;
+                sub += array.len();
             }
             self.child_count += 1;
             self.max_len = self.max_len.max(node.to_string().len());
         }
+        self.child_count -= sub;
         self.matrix = vec![vec![' '; self.max_len]; self.child_count];
     }
 
@@ -100,16 +101,16 @@ impl Printer for TreePrinter {
             }
         } else {
             let s = value.to_string();
-            let s = s[1..s.len() - 1].to_string();
             self.index -= 1;
             let j = self.matrix[self.index]
                 .iter()
                 .rposition(|&c| c != ' ')
                 .unwrap_or(0);
-            self.matrix[self.index][j] = ':';
+            self.matrix[self.index][j + 1] = ':';
             for (k, c) in s.chars().enumerate() {
                 self.matrix[self.index][j + k + 2] = c;
             }
+            self.index += 1;
         }
     }
 
@@ -149,6 +150,20 @@ impl Printer for TreePrinter {
                 }
             }
         }
+        let mut dash_columns = 0;
+        for i in (0..self.matrix[0].len() - 1).rev() {
+            if self.matrix.iter().all(|row| row[i] == ' ') {
+                dash_columns += 1;
+            } else {
+                break;
+            }
+        }
+        let columns_to_remove = std::cmp::max(0, dash_columns - 3);
+        if columns_to_remove > 0 {
+            for row in &mut self.matrix {
+                row.truncate(row.len() - columns_to_remove);
+            }
+        }
         for (_, row) in self.matrix.iter().enumerate() {
             println!("{}", row.iter().collect::<String>());
         }
@@ -159,17 +174,18 @@ impl Printer for RectanglePrinter {
     fn build(&mut self, value: &serde_json::Value) {
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(value);
+        let mut sub = 1;
         while let Some(node) = queue.pop_front() {
             if let serde_json::Value::Object(map) = node {
                 queue.extend(map.values());
             } else if let serde_json::Value::Array(array) = node {
                 queue.extend(array);
-            } else {
-                self.child_count -= 1;
+                sub += array.len();
             }
             self.child_count += 1;
             self.max_len = self.max_len.max(node.to_string().len());
         }
+        self.child_count -= sub;
         self.matrix = vec![vec![' '; self.max_len]; self.child_count];
     }
 
@@ -191,16 +207,16 @@ impl Printer for RectanglePrinter {
             }
         } else {
             let s = value.to_string();
-            let s = s[1..s.len() - 1].to_string();
             self.index -= 1;
             let j = self.matrix[self.index]
                 .iter()
                 .rposition(|&c| c != ' ')
                 .unwrap_or(0);
-            self.matrix[self.index][j] = ':';
+            self.matrix[self.index][j + 1] = ':';
             for (k, c) in s.chars().enumerate() {
                 self.matrix[self.index][j + k + 2] = c;
             }
+            self.index += 1;
         }
     }
 
@@ -275,6 +291,24 @@ impl Printer for RectanglePrinter {
                 '│' | '├' => '┴',
                 _ => *cell,
             };
+        }
+        let mut dash_columns = 0;
+        for i in (0..self.matrix[0].len() - 1).rev() {
+            if self.matrix.iter().all(|row| row[i] == '─') {
+                dash_columns += 1;
+            } else {
+                break;
+            }
+        }
+        let columns_to_remove = std::cmp::max(0, dash_columns - 3);
+        if columns_to_remove > 0 {
+            for i in 0..self.child_count {
+                self.matrix[i][self.max_len - 1 - columns_to_remove] =
+                    self.matrix[i][self.max_len - 1];
+            }
+            for row in &mut self.matrix {
+                row.truncate(row.len() - columns_to_remove);
+            }
         }
         for (_, row) in self.matrix.iter().enumerate() {
             println!("{}", row.iter().collect::<String>());
